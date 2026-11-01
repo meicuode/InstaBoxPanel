@@ -84,7 +84,7 @@ export async function checkDesktopProtocol(browser,root,output) {
           else if(stage===2){stage=3;const name=Buffer.from('Test desktop'),init=Buffer.alloc(24+name.length);init.writeUInt16BE(80,0);init.writeUInt16BE(50,2);Buffer.from([32,24,0,1,0,255,0,255,0,255,16,8,0,0,0,0]).copy(init,4);init.writeUInt32BE(name.length,20);name.copy(init,24);socket.send(init);}
           else if(frame[0]===0){assert.equal(frame[4],32);format={bigEndian:!!frame[6],redShift:frame[14],greenShift:frame[15],blueShift:frame[16]};}
           else if(frame[0]===3&&!painted){painted=true;const update=Buffer.alloc(16+80*50*4);update.writeUInt16BE(1,2);update.writeUInt16BE(80,8);update.writeUInt16BE(50,10);const color=(48<<format.redShift)|(144<<format.greenShift)|(96<<format.blueShift);for(let p=16;p<update.length;p+=4){if(format.bigEndian)update.writeUInt32BE(color>>>0,p);else update.writeUInt32LE(color>>>0,p);}socket.send(update);}
-          else if(frame[0]===4||frame[0]===5||frame[0]===6)inputEvents.push(Buffer.from(frame));
+          else if(frame[0]===4||frame[0]===5||frame[0]===6){inputEvents.push(Buffer.from(frame));if(frame[0]===6){const text=frame.subarray(8).toString('latin1');assert.equal(text,'host to VM');page.evaluate(()=>window.__rfbClipboardSent=true).catch(()=>{});}}
         }
       });
     });
@@ -94,7 +94,14 @@ export async function checkDesktopProtocol(browser,root,output) {
     assert.deepEqual(await canvas.evaluate(c=>Array.from(c.getContext('2d').getImageData(0,0,1,1).data)),[48,144,96,255],'RFB framebuffer pixels');
     await canvas.click();await page.keyboard.press('x');assert.equal(inputEvents.length,0);
     await pane.getByRole('button',{name:'人工接管',exact:true}).click();await pane.getByText('你正在控制',{exact:true}).waitFor();await canvas.click();await page.keyboard.press('x');await page.waitForTimeout(150);assert.ok(inputEvents.some(f=>f[0]===4),'RFB key input after takeover');
+    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>'host to VM',writeText:async text=>{window.__systemClipboard=text;}}}));
+    await pane.getByRole('button',{name:'发送剪贴板',exact:true}).click();await page.waitForFunction(()=>window.__systemClipboard===undefined);
+    await page.waitForFunction(()=>window.__rfbClipboardSent===true);
+    const remoteText=Buffer.from('VM to host');const cutText=Buffer.alloc(8+remoteText.length);cutText[0]=3;cutText.writeUInt32BE(remoteText.length,4);remoteText.copy(cutText,8);server.clients.forEach(socket=>{if(socket.readyState===1)socket.send(cutText);});
+    const copyRemote=pane.getByRole('button',{name:'复制到本机',exact:true});await copyRemote.waitFor();assert.equal(await copyRemote.isEnabled(),true);
+    await copyRemote.click();await page.waitForFunction(()=>window.__systemClipboard==='VM to host');assert.equal(await pane.getByText('虚拟机剪贴板已复制到本机。',{exact:true}).count(),1);
     await pane.getByRole('button',{name:'交还 AI',exact:true}).click();const before=inputEvents.length;await canvas.click();await page.keyboard.press('y');await page.waitForTimeout(100);assert.equal(inputEvents.length,before,'handback blocks all VNC input');
+    assert.equal(await copyRemote.isDisabled(),true,'remote clipboard copy is disabled after handback');assert.equal(await pane.getByText('已收到虚拟机剪贴板内容。',{exact:true}).count(),0,'handback clears staged remote clipboard text');
     await pane.getByRole('button',{name:'人工接管',exact:true}).click();await pane.getByText('你正在控制',{exact:true}).waitFor();failStatus=true;await pane.getByText('平台暂时离线',{exact:true}).waitFor();const staleCount=inputEvents.length;await canvas.click();await page.keyboard.press('z');await page.waitForTimeout(100);assert.equal(inputEvents.length,staleCount,'stale status blocks input');
     await page.screenshot({path:path.join(output,'desktop-rfb-protocol.png')});await pane.getByRole('button',{name:'关闭远程桌面',exact:true}).click();await page.waitForTimeout(200);assert.equal(active,0);assert.equal(desktop.controller,'agent');
     await checkSnapshotFailureRecovery(page);assert.deepEqual(errors,[]);
