@@ -1,18 +1,32 @@
 import { ApiError, isDemo } from './api';
-import { baseName, maxUploadBytes, type FileWritten } from '../shared/files';
+import { baseName, maxMultipartBytes, maxUploadBytes, type FileWritten } from '../shared/files';
+import { multipartUpload } from './multipart-api';
 
-export async function uploadFile(base: string, file: File, path: string, parents: boolean, overwrite: boolean, signal: AbortSignal, progress: (percent: number) => void): Promise<FileWritten> {
-  if (file.size > maxUploadBytes) throw new ApiError('file_too_large', '单个文件最多 95 MiB。', 413);
+export async function uploadFile(base: string, file: File, path: string, parents: boolean, overwrite: boolean, signal: AbortSignal, progress: (percent: number, detail?: string) => void): Promise<FileWritten> {
+  if (file.size > maxMultipartBytes) throw new ApiError('file_too_large', '单个文件最多 20 GiB。', 413);
+  if (file.size > maxUploadBytes) {
+    return multipartUpload(base, file, path, parents, overwrite, signal, progress);
+  }
   const url = base + '/content?' + new URLSearchParams({ path, parents: String(parents), overwrite: String(overwrite) });
   if (isDemo) {
     const { demoRequest } = await import('./demo');
     const result = await demoRequest(url, { method: 'PUT', body: file, signal }) as FileWritten;
     progress(100); return result;
   }
+  const result = await sendBlob<FileWritten>(url, file, signal, progress);
+  if (!result || result.size !== file.size || typeof result.path !== 'string' || !/^[0-9a-f]{64}$/i.test(result.sha256))
+    throw new ApiError('upload_response_invalid', '上传结果尚未确认，请刷新目录核对。', 502);
+  return result;
+}
+export async function sendBlob<T>(url: string, file: Blob, signal: AbortSignal, progress: (percent: number) => void, headers: Record<string, string> = {}): Promise<T> {
+  if (isDemo) {
+    const { demoRequest } = await import('./demo');
+    const value = await demoRequest(url, { method: 'PUT', body: { blob: file, headers }, signal }); progress(100); return value as T;
+  }
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
-    const finish = (error?: ApiError, value?: FileWritten) => {
+    const finish = (error?: ApiError, value?: T) => {
       signal.removeEventListener('abort', abort);
       if (error) reject(error); else resolve(value!);
     };
@@ -20,6 +34,7 @@ export async function uploadFile(base: string, file: File, path: string, parents
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.setRequestHeader('X-Panel-Request', '1');
     xhr.setRequestHeader('Accept', 'application/json');
+    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = e => { if (e.lengthComputable) progress(Math.round(e.loaded / e.total * 100)); };
     xhr.onerror = () => finish(new ApiError('network_error', '连接中断，上传结果尚未确认。'));
     xhr.ontimeout = () => finish(new ApiError('upload_timeout', '上传超时，结果尚未确认。'));
@@ -33,9 +48,6 @@ export async function uploadFile(base: string, file: File, path: string, parents
       catch { finish(new ApiError('upload_response_invalid', '上传结果尚未确认，请刷新目录核对。', 502)); return; }
       if (xhr.status < 200 || xhr.status >= 300) {
         finish(new ApiError(value.error?.code || 'upload_failed', value.error?.message || '上传失败，请稍后重试。', xhr.status)); return;
-      }
-      if (value.size !== file.size || typeof value.path !== 'string' || !/^[0-9a-f]{64}$/i.test(value.sha256)) {
-        finish(new ApiError('upload_response_invalid', '上传结果尚未确认，请刷新目录核对。', 502)); return;
       }
       finish(undefined, value);
     };

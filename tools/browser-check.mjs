@@ -7,6 +7,7 @@ import { checkTerminalConnections } from './terminal-browser-check.mjs';
 import { checkResourceViews, checkDesktopProtocol } from './resources-browser-check.mjs';
 import { checkPortViews, checkPortFailures } from './ports-browser-check.mjs';
 import { checkFileViews, checkFileFailures } from './files-browser-check.mjs';
+import { checkMultipartUploads } from './multipart-browser-check.mjs';
 const root=process.cwd(),base='http://127.0.0.1:4177',output=path.join(root,'test-results');
 await mkdir(output,{recursive:true});
 let executablePath;
@@ -146,6 +147,7 @@ try{
   await checkDesktopProtocol(browser,root,output);step('real noVNC RFB handshake/framebuffer/input, read-only handback, stale status and disconnect');
   await checkPortFailures(browser,root,output);step('port permissions, lost responses, stale reads, account switching, safe links, availability, and quota');
   await checkFileFailures(browser,root,output);step('file transfer progress, binary payloads, cancellation, lost replies, overwrite, permissions, accounts, and expired sessions');
+  await checkMultipartUploads(browser,root,output);step('100 MiB multipart upload, verified chunks, resume after reload, merge confirmation, cancellation and cleanup');
   assert.deepEqual(failures,[],'browser errors');await writeFile(path.join(output,'browser-report.json'),JSON.stringify({passed:steps,errors:failures},null,2)+'\n');console.log('Browser checks passed: '+steps.length);
 }catch(error){if(browser){const page=browser.contexts()[0]?.pages()[0];if(page)await page.screenshot({path:path.join(output,'failure.png'),fullPage:true}).catch(()=>{});}console.error(error);process.exitCode=1;}
 finally{await browser?.close();child.kill();}

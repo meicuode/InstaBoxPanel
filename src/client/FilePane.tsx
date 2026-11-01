@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUp, Check, Download, File, Folder, FolderPlus, Home, Link, LoaderCircle, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import { api, ApiError } from './api';
 import { downloadFile, uploadFile } from './file-api';
-import { baseName, fileName, filePath, fileSize, joinPath, maxUploadBytes, parentPath, type FileEntry, type FileView } from '../shared/files';
+import { baseName, fileName, filePath, fileSize, joinPath, maxMultipartBytes, maxUploadBytes, parentPath, type FileEntry, type FileView } from '../shared/files';
+import { cleanupUpload, pendingUploads, type PendingUpload } from './multipart-api';
 import { Modal, type MachineRow } from './App';
 import './files.css';
 
@@ -20,9 +21,11 @@ export default function FilePane({ row, onClose, onAuthError }: { row: MachineRo
   const [edit, setEdit] = useState<Edit | null>(null), [uploadOpen, setUploadOpen] = useState(false);
   const [destination, setDestination] = useState('/data/home'), [parents, setParents] = useState(false);
   const [selected, setSelected] = useState<globalThis.File[]>([]), [queue, setQueue] = useState<UploadItem[]>([]);
+  const [retained, setRetained] = useState<PendingUpload[]>([]);
   const mounted = useRef(true), lock = useRef(false), stop = useRef(false), transfer = useRef<AbortController | null>(null);
   const account = row.sources.find(a => a.id === accountId);
   const base = '/api/accounts/' + accountId + '/machines/' + row.machine.id + '/files';
+  useEffect(() => { const refresh = () => setRetained(pendingUploads(base)); refresh(); window.addEventListener('panel-upload-change', refresh); return () => window.removeEventListener('panel-upload-change', refresh); }, [base]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop.current = true; transfer.current?.abort(); }; }, []);
   useEffect(() => {
     let stopped = false;
@@ -92,7 +95,7 @@ export default function FilePane({ row, onClose, onAuthError }: { row: MachineRo
         const controller = new AbortController(); transfer.current = controller;
         updateItem(item.id, { state: 'sending', percent: 0, message: '' });
         try {
-          await uploadFile(base, item.file, item.path, item.parents, overwrite, controller.signal, percent => updateItem(item.id, { percent }));
+          await uploadFile(base, item.file, item.path, item.parents, overwrite, controller.signal, (percent, message) => updateItem(item.id, { percent, message: message || '' }));
           updateItem(item.id, { state: 'done', percent: 100, message: '上传完成' });
         } catch (e) {
           const state = e instanceof ApiError && e.code === 'file_exists' ? 'conflict' : uncertain(e) ? 'uncertain' : 'failed';
@@ -111,11 +114,21 @@ export default function FilePane({ row, onClose, onAuthError }: { row: MachineRo
     if (!canAct || !selected.length) return;
     try {
       const folder = filePath(destination);
-      if (selected.some(f => f.size > maxUploadBytes)) throw new Error('单个文件最多 95 MiB，请重新选择。');
+      if (selected.some(f => f.size > maxMultipartBytes)) throw new Error('单个文件最多 20 GiB，请重新选择。');
       if (new Set(selected.map(f => f.name)).size !== selected.length) throw new Error('本次选择中有重复文件名，请分批上传。');
       const items: UploadItem[] = selected.map((file, id) => ({ id, file, path: joinPath(folder, file.name), parents, state: 'waiting', percent: 0, message: '' }));
       setQueue(items); void send(items);
     } catch (e) { setError(errorText(e)); }
+  }
+  async function clean(record: PendingUpload) {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setError('');
+    try {
+      await cleanupUpload(record); setNotice('临时分片已清理，目标文件不受影响。');
+      setQueue(items => items.map(item => item.path === record.path && item.file.size === record.size ? { ...item, state: 'waiting', percent: 0, message: '' } : item));
+    }
+    catch (e) { setError(errorText(e)); onAuthError(e); }
+    finally { lock.current = false; if (mounted.current) { setBusy(false); setRevision(v => v + 1); } }
   }
   const current = data?.path || path;
   return <Modal title={row.machine.name + ' · 文件管理'} wide onClose={() => { if (!lock.current) onClose(); }}><div className="file-pane">
@@ -144,19 +157,20 @@ export default function FilePane({ row, onClose, onAuthError }: { row: MachineRo
       <form onSubmit={beginUpload}><label>目标目录<input required value={destination} disabled={busy || queue.length > 0} placeholder="/data/home/uploads" spellCheck={false} onChange={e => setDestination(e.target.value)}/></label>
         <label>选择文件<input type="file" multiple disabled={busy} onChange={e => { setSelected(Array.from(e.target.files || [])); setQueue([]); setError(''); }}/></label>
         <label className="checkbox-label"><input type="checkbox" checked={parents} disabled={busy || queue.length > 0} onChange={e => setParents(e.target.checked)}/>自动创建不存在的目录</label>
-        <p className="field-help">单个文件最多 95 MiB，支持多选。同名文件需要逐个确认覆盖。上传期间请保持此页面打开。</p>
+        <p className="field-help">单个文件最多 20 GiB。超过 95 MiB 会自动分片，上传后合并校验。同名文件需要逐个确认覆盖；中断后重新选择原文件可续传。</p>
         <div className="file-buttons"><button className="button primary" disabled={!canAct || !selected.length || queue.length > 0}><Upload size={15}/>开始上传{selected.length > 0 ? '（' + selected.length + '）' : ''}</button>
           {busy && transfer.current && <button className="button" type="button" onClick={() => { stop.current = true; transfer.current?.abort(); }}>取消上传</button>}
           {!!queue.length && !busy && <button className="button subtle" type="button" onClick={() => setQueue([])}>重新准备上传</button>}</div>
       </form>
       <div className="file-upload-list" aria-live="polite">{queue.map(item => <article className="file-upload-item" key={item.id}>
         <strong>{item.file.name}<small>{fileSize(item.file.size)}</small></strong><p className="file-target">{item.path}</p>
-        <div className="file-upload-status"><span>{item.state === 'sending' ? item.percent < 100 ? '上传中 ' + item.percent + '%' : '等待服务器确认…' : item.state === 'waiting' ? '尚未上传' : item.message}</span>
+        <div className="file-upload-status"><span>{item.state === 'sending' ? item.message || (item.percent < 100 ? '上传中 ' + item.percent + '%' : '等待服务器确认…') : item.state === 'waiting' ? '尚未上传' : item.message}</span>
           {!busy && item.state === 'conflict' && <button className="button danger compact" disabled={!canAct} onClick={() => void send([item], true)}>确认覆盖</button>}
-          {!busy && ['failed', 'uncertain', 'waiting'].includes(item.state) && <button className="button compact" disabled={!canAct} onClick={() => void send([item])}>{item.state === 'waiting' ? '上传此文件' : '重新上传'}</button>}</div>
+          {!busy && ['failed', 'uncertain', 'waiting'].includes(item.state) && <button className="button compact" disabled={!canAct} onClick={() => void send([item])}>{item.state === 'waiting' ? '上传此文件' : item.file.size > maxUploadBytes ? '继续上传' : '重新上传'}</button>}</div>
         {item.state === 'uncertain' && <p className="field-help">请先刷新并核对目标文件，再决定是否重传。</p>}
         {item.state === 'sending' && <progress aria-label={item.file.name + ' 上传进度'} max={100} value={item.percent}/>}</article>)}</div>
     </section>}
+    {!!retained.length && <section className="file-form file-retained"><h3>保留的上传任务</h3><p className="field-help">重新选择原文件并使用相同目标目录即可续传。清理只移除临时分片；正在合并时需等待合并结束。</p>{retained.map(record => <article className="file-upload-item" key={record.id}><strong>{record.name}<small>{fileSize(record.size)}</small></strong><p className="file-target">{record.path}</p><button className="button compact" disabled={busy || !account?.enabled} onClick={() => void clean(record)}>清理分片</button></article>)}</section>}
     {loading && <div className="file-loading" role="status"><LoaderCircle size={16} className="spin"/>正在读取文件…</div>}
     {data && <><div className="file-summary"><span>{data.type === 'dir' ? data.entries.length + ' 个项目' : fileSize(data.size)}</span><code>{data.mode}</code><span>{new Date(data.modTime).toLocaleString('zh-CN')}</span></div>
       {data.truncated && <div className="notice">{data.type === 'dir' ? '仅展示前 5000 个项目；可以在路径栏输入完整路径访问其他项目。' : '仅预览前 256 KiB，下载可获取完整内容。'}</div>}

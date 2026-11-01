@@ -1,9 +1,11 @@
-import { baseName, fileName, filePath, joinPath, maxPreviewBytes, maxUploadBytes, parentPath, type FileView, type FileWritten } from '../shared/files';
+import { baseName, fileName, filePath, joinPath, maxPreviewBytes, maxUploadBytes, parentPath, type FileView } from '../shared/files';
 import { PanelError } from './errors';
 import type { Instabox } from './instabox';
 import { resourceBody, resourceId, type ResourceAccess, type ResourceApp, type ResourceContext } from './resource-context';
+import { streamUpload } from './upload-stream';
+import { registerMultipartRoutes } from './multipart';
 
-export const isFileUpload = (method: string, path: string) => method === 'PUT' && /^\/api\/accounts\/[^/]+\/machines\/[^/]+\/files\/content$/.test(path);
+export const isFileUpload = (method: string, path: string) => method === 'PUT' && /^\/api\/accounts\/[^/]+\/machines\/[^/]+\/files\/(?:content|uploads\/[0-9a-f-]+\/parts\/\d+)$/.test(path);
 function validate<T>(task: () => T): T {
   try { return task(); } catch (e) { throw new PanelError(400, 'invalid_file_path', (e as Error).message); }
 }
@@ -108,34 +110,8 @@ export function registerFileRoutes(app: ResourceApp, access: ResourceAccess) {
       catch (e) { if (!(e instanceof PanelError && e.status === 404 && e.code === 'not_found')) throw e; }
       if (exists) throw new PanelError(409, 'file_exists', '目标已存在，请确认覆盖这个文件。');
     }
-    let received = 0, tooLarge = false, complete = false;
-    const input = c.req.raw.body || new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
-    const body = input.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        received += chunk.byteLength;
-        if (received > maxUploadBytes) { tooLarge = true; throw new Error('upload limit'); }
-        controller.enqueue(chunk);
-      },
-      flush() {
-        if (length !== undefined && received !== Number(length)) throw new Error('incomplete upload');
-        complete = true;
-      },
-    }));
-    let result: any;
-    try {
-      result = await fileCall(() => remote.request(base + '/files?' + new URLSearchParams({ path, parents: c.req.query('parents') || 'false' }), {
-        method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body, signal: c.req.raw.signal,
-      }, 15 * 60 * 1000));
-    } catch (e) {
-      if (tooLarge) throw new PanelError(413, 'file_too_large', '单个文件最多 95 MiB，上传已中断。');
-      throw e;
-    } finally {
-      if (!body.locked) await body.cancel().catch(() => {});
-    }
-    if (!complete || !result || result.size !== received || !/^[0-9a-f]{64}$/i.test(result.sha256) ||
-        typeof result.created !== 'boolean' || typeof result.mode !== 'string' || typeof result.path !== 'string') malformed();
-    const written: FileWritten = { path: result.path, size: result.size, sha256: result.sha256, created: result.created, mode: result.mode };
-    return c.json(written, result.created ? 201 : 200);
+    const written = await fileCall(() => streamUpload(remote, base, path, c.req.raw, maxUploadBytes, c.req.query('parents') === 'true'));
+    return c.json(written, written.created ? 201 : 200);
   });
   app.post(route + '/directory', async c => {
     const body = await resourceBody(c), path = writablePath(body.path);
@@ -162,4 +138,5 @@ export function registerFileRoutes(app: ResourceApp, access: ResourceAccess) {
     await command(remote, base, ['rm', ...(body.recursive ? ['--recursive', '--one-file-system', '--preserve-root=all'] : []), '--', path]);
     return c.json({ ok: true });
   });
+  registerMultipartRoutes(app, access);
 }

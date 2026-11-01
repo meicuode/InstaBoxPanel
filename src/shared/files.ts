@@ -1,5 +1,12 @@
 // Below Cloudflare's 100 MB request limit; file bodies are streamed, never JSON/base64.
 export const maxUploadBytes = 95 * 1024 * 1024;
+export const uploadChunkBytes = 16 * 1024 * 1024;
+export const maxMultipartBytes = 20 * 1024 * 1024 * 1024;
+export interface UploadState {
+  path: string; state: 'uploading' | 'merging' | 'failed' | 'complete';
+  parts: { index: number; sha256: string }[]; result?: FileWritten; error?: string; errorCode?: string;
+}
+export interface UploadSession extends UploadState { ticket: string; uploadId: string; chunkSize: number }
 export const maxPreviewBytes = 256 * 1024;
 export interface FileEntry {
   name: string; type: 'dir' | 'file' | 'symlink' | 'other'; size: number; mode: string; modTime: string; target?: string;
@@ -27,5 +34,6 @@ export const joinPath = (directory: string, name: string) => filePath((filePath(
 export function fileSize(bytes: number) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MiB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MiB';
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GiB';
 }
