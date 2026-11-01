@@ -24,10 +24,15 @@ export function machineView(raw: unknown): Machine {
 export class Instabox {
   constructor(private apiKey: string, private fetcher: Fetcher = (input, init) => fetch(input, init)) {}
   async request(path: string, init: RequestInit = {}, timeout = 15000): Promise<any> {
+    const response = await this.response(path, init, timeout);
+    if (response.status === 204) return null;
+    try { return await response.json(); } catch { malformed(); }
+  }
+  async response(path: string, init: RequestInit = {}, timeout = 15000): Promise<Response> {
     let response: Response;
     try {
       response = await this.fetcher('https://api.instabox.sh' + path, {
-        ...init, redirect: 'manual', signal: AbortSignal.timeout(timeout),
+        ...init, redirect: 'manual', signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
         headers: { 'Accept': 'application/json', 'X-API-Key': this.apiKey, ...init.headers },
       });
     } catch (error) {
@@ -36,7 +41,7 @@ export class Instabox {
     }
     if (response.status >= 300 && response.status < 400)
       throw new PanelError(502, 'upstream_redirect', 'InstaBox 返回了非预期跳转，已停止请求。');
-    if (response.status === 204) return null;
+    if (response.ok) return response;
     let data: any;
     try { data = await response.json(); } catch { malformed(); }
     if (!response.ok) {
@@ -47,7 +52,7 @@ export class Instabox {
       // Do not expose untrusted upstream messages, headers, or credentials.
       throw new PanelError(response.status === 401 || response.status === 403 ? 422 : response.status, code, safeUpstreamMessage(code), retryable);
     }
-    return data;
+    return response;
   }
   async me() {
     const raw = await this.request('/v1/me');

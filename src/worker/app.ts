@@ -13,6 +13,7 @@ import { authenticateSession, sessionStatus, setupAdmin, loginAdmin, logoutAdmin
 import { registerDesktopRoutes } from './desktop';
 import { registerSnapshotRoutes } from './snapshots';
 import { registerPortRoutes } from './ports';
+import { isFileUpload, registerFileRoutes } from './files';
 
 export interface Env { DB: D1Database; KEY_ENCRYPTION_SECRET?: string; AUTOMATION_SECRET?: string; ASSETS: FetcherBinding }
 interface FetcherBinding { fetch(request: Request): Promise<Response> }
@@ -66,12 +67,16 @@ export function createApp(deps: Dependencies = {}) {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !(c.req.method === 'POST' && c.req.path === '/api/telegram/webhook')) {
       if (c.req.header('Origin') !== new URL(c.req.url).origin || c.req.header('X-Panel-Request') !== '1')
         throw new PanelError(403, 'csrf_rejected', '请求来源验证失败，请从面板重新操作。');
-      if (!c.req.header('Content-Type')?.startsWith('application/json'))
+      if (isFileUpload(c.req.method, c.req.path)) {
+        if (c.req.header('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/octet-stream')
+          throw new PanelError(415, 'binary_required', '上传必须使用二进制文件内容。');
+      } else if (!c.req.header('Content-Type')?.startsWith('application/json'))
         throw new PanelError(415, 'json_required', '请求必须使用 JSON。');
     }
     await next();
   });
-  app.use('/api/*', bodyLimit({ maxSize: 8192, onError: c => c.json({ error: { code: 'body_too_large', message: '请求内容过大。' } }, 413) }));
+  const jsonLimit = bodyLimit({ maxSize: 8192, onError: c => c.json({ error: { code: 'body_too_large', message: '请求内容过大。' } }, 413) });
+  app.use('/api/*', (c, next) => isFileUpload(c.req.method, c.req.path) ? next() : jsonLimit(c, next));
   async function jsonBody(request: Request): Promise<unknown> {
     try { return await request.json(); }
     catch { throw new PanelError(400, 'invalid_json', '请求 JSON 无效。'); }
@@ -280,6 +285,7 @@ export function createApp(deps: Dependencies = {}) {
   registerDesktopRoutes(app,{account,remote:client,fetcher:deps.fetcher});
   registerSnapshotRoutes(app,{account,remote:client,fetcher:deps.fetcher});
   registerPortRoutes(app,{account,remote:client});
+  registerFileRoutes(app,{account,remote:client});
   app.all('/api/*', c => c.json({ error: { code: 'not_found', message: '接口不存在。' } }, 404));
   app.get('*', c => c.env.ASSETS.fetch(c.req.raw));
   app.onError((error, c) => {

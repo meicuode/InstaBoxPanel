@@ -90,7 +90,8 @@ export async function checkPortFailures(browser, root, output) {
     await page.goto(base); await page.getByRole('button', { name: '查看 ports-test 端口转发', exact: true }).click();
     const modal = page.getByRole('dialog', { name: 'ports-test · 端口转发', exact: true });
     const button = name => modal.getByRole('button', { name, exact: true });
-    await modal.getByLabel('端口操作账号', { exact: true }).selectOption('a');
+    const accountSelect = modal.getByLabel('端口操作账号', { exact: true });
+    if (await accountSelect.inputValue() !== 'a') await accountSelect.selectOption('a');
     await modal.getByText('暂无公开端口', { exact: true }).waitFor(); await button('发布端口').click();
     const nameInput = modal.getByLabel('端口名称（可选）', { exact: true });
     await modal.getByLabel('端口号', { exact: true }).fill('3000'); await nameInput.fill('preview'); scopeError = true;

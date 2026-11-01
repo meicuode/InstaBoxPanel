@@ -4,6 +4,7 @@ import { validateSchedule, type KeepaliveOverview } from '../shared/keepalive';
 import type { TelegramStatus } from '../shared/telegram';
 import { demoResources } from './demo-resources';
 import { demoPorts } from './demo-ports';
+import { demoFiles } from './demo-files';
 let telegram: TelegramStatus = { tokenRequired: true, enabled: false, username: '', chatId: '', notifyOffline: false, lastError: '' };
 const keepalive: KeepaliveOverview = { intervalMinutes: 1, maxMachines: 5, policies: [], lastRunAt: null };
 const stamp = () => new Date().toISOString();
@@ -46,6 +47,8 @@ export async function demoRequest(path: string, options: { method?: string; body
   }
   if (url.pathname === '/api/auth/logout' && method === 'POST') { authenticated = false; return { ok: true }; }
   if (!authenticated) throw new ApiError('authentication_required', '请先登录管理员账号。', 401);
+  const files = await demoFiles(url, method, options.body, accounts, machines);
+  if (files !== undefined) return files;
   const ports = demoPorts(url.pathname,method,body,accounts,machines);
   if (ports !== undefined) return ports;
   const resource = demoResources(url.pathname,method,body,accounts,machines);
