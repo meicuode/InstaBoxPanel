@@ -1,5 +1,6 @@
 import { automationDataKey, type AutomationEnv } from './automation';
 import { checkKeepalive } from './keepalive';
+import { checkBoxKeepalive } from './box-keepalive';
 import { checkTelegramNotifications } from './telegram';
 import { database, ensureDatabase } from './schema';
 import { PanelError } from './errors';
@@ -31,7 +32,10 @@ export async function runAutomation(env: AutomationEnv, scheduledTime = Date.now
   try {
     const dataKey = await automationDataKey(env);
     try { await checkTelegramNotifications(env, dataKey, notificationFetch, tick); }
-    finally { await checkKeepalive(env, dataKey, limitedFetch); }
+    finally {
+      try { await checkBoxKeepalive(env, dataKey, limitedFetch); }
+      finally { await checkKeepalive(env, dataKey, limitedFetch); }
+    }
   } finally {
     await db.prepare('UPDATE insb_scheduler SET lease_until=0,last_run_at=? WHERE id=1 AND lease_token=?').bind(Date.now(), token).run();
   }

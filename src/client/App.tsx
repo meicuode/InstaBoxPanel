@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type FormEvent } from 'react';
-import { Activity, Archive, FolderOpen, Monitor, Network, ArrowUpRight, Box, Check, ChevronRight, CircleAlert, Clock3, Ellipsis, HeartPulse, Layers3, LoaderCircle, LogOut, Pause, Play, Plus, RefreshCw, Search, Send, Server, ShieldCheck, Square, TerminalSquare, X } from 'lucide-react';
+import { Activity, Archive, FolderOpen, Monitor, Network, ArrowUpRight, Box, Boxes, Check, ChevronRight, CircleAlert, Clock3, Ellipsis, HeartPulse, Layers3, LoaderCircle, LogOut, Pause, Play, Plus, RefreshCw, Search, Send, Server, ShieldCheck, Square, TerminalSquare, X } from 'lucide-react';
 import { api, ApiError, concurrent, isDemo } from './api';
 import { actionLabels, actionSourceLabels, stateLabels, type Account, type AccountMachines, type Action, type ActionType, type Machine, type Session } from '../shared/types';
 import AuthScreen from './AuthScreen';
 import KeepaliveForm from './KeepaliveForm';
 import TelegramForm from './TelegramForm';
+import BoxPanel from './BoxPanel';
 import type { KeepaliveOverview } from '../shared/keepalive';
 import { usePanelRoute } from './usePanelRoute';
 import { useTerminalWindows } from './useTerminalWindows';
@@ -79,7 +80,7 @@ export default function App(){
 }
 function Dashboard({session,signedOut}:{session:Session;signedOut:()=>void}){
   const {route,navigate,link}=usePanelRoute();
-  const selected=route.selected,history=route.view==='history',telegramOpen=route.view==='telegram';
+  const selected=route.selected,history=route.view==='history',telegramOpen=route.view==='telegram',boxOpen=route.view==='box';
   const setSelected=(selected:string)=>navigate({view:'machines',selected});
   const setHistory=(open:boolean)=>navigate({view:open?'history':'machines',selected},!open);
   const setTelegramOpen=(open:boolean)=>navigate({view:open?'telegram':'machines',selected},!open);
@@ -240,14 +241,16 @@ function Dashboard({session,signedOut}:{session:Session;signedOut:()=>void}){
       <div className="workspace-label"><span className="workspace-avatar">{session.username[0]?.toUpperCase()||'I'}</span><div><strong>私人工作空间</strong><small>只属于你的控制台</small></div><ShieldCheck size={17}/></div>
       <div className="sidebar-caption">工作空间</div>
       <a {...link({view:'machines',selected:'all'})} className={'nav-item '+(selected==='all'&&route.view==='machines'?'selected':'')} aria-current={selected==='all'&&route.view==='machines'?'page':undefined}><Layers3 size={18}/><span>全部机器</span><span className="nav-count">{total}</span></a>
+      <a {...link({view:'box',selected})} className={'nav-item box-nav '+(boxOpen?'selected':'')} aria-current={boxOpen?'page':undefined}><Boxes size={18}/><span>box panel</span></a>
       <a {...link({view:'history',selected})} className={'nav-item '+(history?'selected':'')} aria-current={history?'page':undefined}><Activity size={18}/><span>操作记录</span>{actions.some(unresolved)&&<span className="nav-count">{actions.filter(unresolved).length}</span>}</a>
       <div className="sidebar-caption account-caption"><span>已连接账号 <span>{accounts.length}</span></span><button className="icon-button" aria-label="添加账号" onClick={()=>setForm('new')}><Plus size={17}/></button></div>
       <div className="account-nav">{accounts.map(a=><div key={a.id} className={'account-nav-row '+(selected===a.id&&route.view==='machines'?'selected':'')}><a {...link({view:'machines',selected:a.id})} className="account-select" aria-current={selected===a.id&&route.view==='machines'?'page':undefined}><span className={'connection-dot '+(!a.enabled?'disabled':snapshots[a.id]?.error?'bad':'good')}/><span><strong>{a.label}</strong><small>{a.enabled?a.login||a.email||'已接入':'已停用'}</small></span></a><button className="icon-button" aria-label={'管理账号 '+a.label} onClick={()=>setForm(a)}><Ellipsis size={18}/></button></div>)}</div>
       <button className="add-account" onClick={()=>setForm('new')}><Plus size={16}/>连接另一个账号</button>
       <div className="sidebar-bottom"><div className="protected"><ShieldCheck size={16}/>{isDemo?'本地演示空间':'私人访问已保护'}</div><div className="profile"><span className="profile-avatar">{session.username[0]?.toUpperCase()||'I'}</span><div><strong>{session.username}</strong><small>管理员</small></div><button className="icon-button" aria-label="退出登录" onClick={()=>void logout()}><LogOut size={16}/></button></div></div>
     </aside>
-    <main className="main"><header className="topbar"><div className="breadcrumb">工作空间<ChevronRight size={14}/><strong>{history?'操作记录':telegramOpen?'Telegram':selected==='all'?'全部机器':accounts.find(a=>a.id===selected)?.label}</strong></div><div className="topbar-links"><a {...link({view:'telegram',selected})} className="text-button telegram-settings" aria-label="Telegram 设置" aria-current={telegramOpen?'page':undefined}><Send size={14}/>Telegram</a><a className="official-link" href="https://dashboard.instabox.sh" target="_blank" rel="noreferrer">官方控制台<ArrowUpRight size={14}/></a><button className="icon-button mobile-logout" aria-label="退出登录" onClick={()=>void logout()}><LogOut size={16}/></button></div></header>
+    <main className="main"><header className="topbar"><div className="breadcrumb">工作空间<ChevronRight size={14}/><strong>{history?'操作记录':telegramOpen?'Telegram':boxOpen?'box panel':selected==='all'?'全部机器':accounts.find(a=>a.id===selected)?.label}</strong></div><div className="topbar-links"><a {...link({view:'box',selected})} className="text-button telegram-settings box-top-link" aria-label="box panel" aria-current={boxOpen?'page':undefined}><Boxes size={14}/><span className="box-top-full">box panel</span><span className="box-top-short">box</span></a><a {...link({view:'telegram',selected})} className="text-button telegram-settings" aria-label="Telegram 设置" aria-current={telegramOpen?'page':undefined}><Send size={14}/>Telegram</a><a className="official-link" href="https://dashboard.instabox.sh" target="_blank" rel="noreferrer">官方控制台<ArrowUpRight size={14}/></a><button className="icon-button mobile-logout" aria-label="退出登录" onClick={()=>void logout()}><LogOut size={16}/></button></div></header>
     <div className="content">
+      {boxOpen?<BoxPanel onAuthError={authError} notify={notify}/>:<>
       {isDemo&&<div className="demo-banner"><span className="demo-dot"/><strong>演示模式</strong><span>示例账号与机器，按钮操作不会影响真实资源。</span></div>}
       <div className="page-heading"><div><div className="eyebrow">YOUR MACHINES, TOGETHER</div><h1>{selected==='all'?'机器总览':accounts.find(a=>a.id===selected)?.label}</h1><p>让每一台机器，都在掌握之中。</p></div><button className="button primary" onClick={()=>setForm('new')}><Plus size={17}/>添加账号</button></div>
       <div className="mobile-scope"><label>当前账号<select aria-label="当前账号" value={selected} onChange={e=>setSelected(e.target.value)}><option value="all">全部账号</option>{accounts.map(a=><option value={a.id} key={a.id}>{a.label}{a.enabled?'':'（已停用）'}</option>)}</select></label>{selected!=='all'&&<button className="button compact" onClick={()=>setForm(accounts.find(a=>a.id===selected)!)}>管理账号</button>}</div>
@@ -269,6 +272,7 @@ function Dashboard({session,signedOut}:{session:Session;signedOut:()=>void}){
         <footer className="panel-footer"><span><ShieldCheck size={14}/>状态查询不会唤醒机器，也不会重置空闲计时。</span><span>{refreshing?'正在同步…':errors.length?'部分账号未同步':'按账号独立同步'}</span></footer>
       </section>
       <div className="bottom-note"><Pause size={15}/><span>开启保活的机器会在时间窗口内自动恢复。终端操作会计入机器活动。</span></div>
+      </>}
     </div><footer className="site-footer"><span>© {new Date().getFullYear()} <a href="https://github.com/meicuode/InstaBoxPanel" target="_blank" rel="noopener noreferrer">InstaBoxPanel</a></span><span aria-hidden="true">·</span><a href="https://cfnote.zuichu.de/blog?tag=InstaBox" target="_blank" rel="noopener noreferrer">使用指南</a></footer></main>
     {toast&&<div className={'toast '+(toast.error?'toast-error':'')} role={toast.error?'alert':'status'}>{toast.error?<CircleAlert size={18}/>:<Check size={18}/>}<span>{toast.text}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>setToast(null)}><X size={16}/></button></div>}
     {form&&<AccountForm current={form==='new'?null:form} close={()=>setForm(null)} saved={reloadAccounts}/>}

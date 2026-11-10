@@ -31,7 +31,7 @@ test('first-use login creates only panel tables, allows exactly one administrato
       const initial=await call('/api/auth/login','POST',credentials);assert.equal(initial.status,409);assert.equal(initial.body.error.code,'setup_required');
       const statuses=await Promise.all(Array.from({length:4},()=>call('/api/session')));
       assert.ok(statuses.every(result=>result.status===200&&result.body.setupRequired===true));
-      assert.deepEqual((await db.prepare('SELECT name FROM insb_d1_migrations ORDER BY name').all()).results,[{name:'0001_initial.sql'},{name:'0002_auth.sql'},{name:'0003_keepalive.sql'},{name:'0004_telegram.sql'},{name:'0005_automation_keys.sql'},{name:'0006_action_sources.sql'},{name:'0007_telegram_buttons.sql'},{name:'0008_snapshot_requests.sql'}]);
+      assert.deepEqual((await db.prepare('SELECT name FROM insb_d1_migrations ORDER BY name').all()).results,[{name:'0001_initial.sql'},{name:'0002_auth.sql'},{name:'0003_keepalive.sql'},{name:'0004_telegram.sql'},{name:'0005_automation_keys.sql'},{name:'0006_action_sources.sql'},{name:'0007_telegram_buttons.sql'},{name:'0008_snapshot_requests.sql'},{name:'0009_box_panel.sql'}]);
       assert.deepEqual((await db.prepare('SELECT * FROM accounts').all()).results,[{id:'other-app',payload:'keep this data'}]);
       assert.deepEqual((await db.prepare('SELECT * FROM d1_migrations').all()).results,[{id:1,name:'other-app-init.sql'}]);
     });

@@ -8,6 +8,7 @@ import { Instabox, type Fetcher } from './instabox';
 import { database, ensureDatabase } from './schema';
 import { applyOperation, createAction } from './actions';
 import { keepaliveOverview, saveKeepalive } from './keepalive';
+import { boxOverview, removeBoxAccount, saveBoxAccount, saveBoxKeepalive } from './box-keepalive';
 import { telegramStatus, saveTelegram, removeTelegram, telegramWebhook } from './telegram';
 import { authenticateSession, sessionStatus, setupAdmin, loginAdmin, logoutAdmin, type Identity } from './session';
 import { registerDesktopRoutes } from './desktop';
@@ -109,6 +110,11 @@ export function createApp(deps: Dependencies = {}) {
   app.get('/api/telegram', async c => c.json(await telegramStatus(c.env, c.get('identity').key)));
   app.put('/api/telegram', async c => c.json(await saveTelegram(c.env, await jsonBody(c.req.raw), new URL(c.req.url).origin, c.get('identity').key, deps.fetcher)));
   app.delete('/api/telegram', async c => c.json(await removeTelegram(c.env, deps.fetcher)));
+  app.get('/api/box', async c => c.json(await boxOverview(c.env, c.get('identity').key, deps.fetcher)));
+  app.put('/api/box', async c => c.json(await saveBoxAccount(c.env, await jsonBody(c.req.raw), c.get('identity').key, deps.fetcher)));
+  app.delete('/api/box', async c => c.json(await removeBoxAccount(c.env)));
+  app.put('/api/box/keepalive/:boxId', async c =>
+    c.json(await saveBoxKeepalive(c.env, c.req.param('boxId'), await jsonBody(c.req.raw), c.get('identity').key, deps.fetcher)));
   app.put('/api/accounts/:id/machines/:machineId/keepalive', async c => {
     const row = await account(c.env.DB, c.req.param('id'), true);
     return c.json(await saveKeepalive(c.env, row, validId(c.req.param('machineId')), await jsonBody(c.req.raw), c.get('identity').key, deps.fetcher));

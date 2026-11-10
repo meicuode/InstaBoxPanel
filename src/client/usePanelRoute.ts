@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState, type MouseEvent } from 'react';
 
-type View = 'machines' | 'history' | 'telegram';
+type View = 'machines' | 'history' | 'telegram' | 'box';
 interface PanelRoute { view: View; selected: string }
 
 function readRoute(): PanelRoute {
   const url = new URL(window.location.href);
-  if (url.pathname === '/history' || url.pathname === '/telegram') {
+  if (url.pathname === '/history' || url.pathname === '/telegram' || url.pathname === '/box') {
     return { view: url.pathname.slice(1) as View, selected: url.searchParams.get('account') || 'all' };
   }
   const account = url.pathname.match(/^\/accounts\/([^/]+)\/?$/);

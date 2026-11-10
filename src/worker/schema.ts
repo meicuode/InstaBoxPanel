@@ -6,6 +6,7 @@ import automationKeysSql from '../../migrations/0005_automation_keys.sql';
 import actionSourcesSql from '../../migrations/0006_action_sources.sql';
 import telegramButtonsSql from '../../migrations/0007_telegram_buttons.sql';
 import snapshotRequestsSql from '../../migrations/0008_snapshot_requests.sql';
+import boxPanelSql from '../../migrations/0009_box_panel.sql';
 import { PanelError } from './errors';
 
 const migrations = [
@@ -17,6 +18,7 @@ const migrations = [
   { name: '0006_action_sources.sql', sql: actionSourcesSql },
   { name: '0007_telegram_buttons.sql', sql: telegramButtonsSql },
   { name: '0008_snapshot_requests.sql', sql: snapshotRequestsSql },
+  { name: '0009_box_panel.sql', sql: boxPanelSql },
 ];
 const initialization = new WeakMap<object, Promise<void>>();
 
@@ -70,6 +72,8 @@ export async function ensureDatabase(db: D1Database): Promise<void> {
       (SELECT token FROM insb_telegram_buttons LIMIT 1) AS telegram_button_id,
       (SELECT machine_id FROM insb_machine_watch LIMIT 1) AS watch_id,
       (SELECT id FROM insb_snapshot_requests LIMIT 1) AS snapshot_request_id,
+      (SELECT id FROM insb_box_account LIMIT 1) AS box_account_id,
+      (SELECT box_id FROM insb_box_keepalive LIMIT 1) AS box_keepalive_id,
       (SELECT name FROM insb_d1_migrations LIMIT 1) AS migration`).first();
   } catch (error) {
     if (!isMissingPanelTable(error)) throw error;

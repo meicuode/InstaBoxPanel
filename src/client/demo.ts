@@ -1,12 +1,25 @@
 import type { Account, Action, Machine, ActionType } from '../shared/types';
 import { ApiError } from './api';
 import { validateSchedule, type KeepaliveOverview } from '../shared/keepalive';
+import { BOX_KEEPALIVE_INTERVAL_MINUTES, BOX_KEEPALIVE_MAX_BOXES, type BoxKeepalivePolicy, type BoxOverview, type SimularBox } from '../shared/box';
 import type { TelegramStatus } from '../shared/telegram';
 import { demoResources } from './demo-resources';
 import { demoPorts } from './demo-ports';
 import { demoFiles } from './demo-files';
 let telegram: TelegramStatus = { tokenRequired: true, enabled: false, username: '', chatId: '', notifyOffline: false, lastError: '' };
 const keepalive: KeepaliveOverview = { intervalMinutes: 1, maxMachines: 5, policies: [], lastRunAt: null };
+let boxConfigured = false, boxLabel = '', boxKeySuffix = '';
+let boxPolicies: BoxKeepalivePolicy[] = [];
+const demoBoxes: SimularBox[] = [
+  { boxId: 'cb-demo-main', name: 'main', state: 'running', image: 'sbxdesk:v15', viewUrl: 'https://box.simular.ai/box/cb-demo-main/live' },
+  { boxId: 'cb-demo-work', name: 'work', state: 'hibernated', image: 'sbxdesk:v15', viewUrl: 'https://box.simular.ai/box/cb-demo-work/live' },
+];
+function boxOverview(): BoxOverview {
+  return { configured: boxConfigured, label: boxLabel, keySuffix: boxKeySuffix, enabled: boxConfigured,
+    intervalMinutes: BOX_KEEPALIVE_INTERVAL_MINUTES, maxBoxes: BOX_KEEPALIVE_MAX_BOXES,
+    boxes: boxConfigured ? copy(demoBoxes) : [], policies: copy(boxPolicies),
+    lastRunAt: boxConfigured ? Date.now() - 30000 : null, error: '' };
+}
 const stamp = () => new Date().toISOString();
 const accounts: Account[] = [
   { id: 'demo-main', label: '主账号', userId: '1001', login: 'darre', email: 'darre@example.com', keySuffix: '4f9a', enabled: true, createdAt: stamp(), updatedAt: stamp() },
@@ -54,6 +67,24 @@ export async function demoRequest(path: string, options: { method?: string; body
   const resource = demoResources(url.pathname,method,body,accounts,machines);
   if(resource!==undefined)return resource;
   if (url.pathname === '/api/keepalive') return copy(keepalive);
+  if (url.pathname === '/api/box') {
+    if (method === 'PUT') {
+      if (!String(body?.apiKey || '').startsWith('cb_demo_')) throw new ApiError('demo_key', '演示模式请使用示例密钥 cb_demo_example。');
+      boxConfigured = true; boxLabel = body?.label || 'Simular box'; boxKeySuffix = String(body?.apiKey).slice(-4);
+      return boxOverview();
+    }
+    if (method === 'DELETE') { boxConfigured = false; boxLabel = ''; boxKeySuffix = ''; boxPolicies = []; return { ok: true }; }
+    return boxOverview();
+  }
+  const demoBoxKeepalive = url.pathname.match(/^\/api\/box\/keepalive\/([^/]+)$/);
+  if (demoBoxKeepalive && method === 'PUT') {
+    const policy = validateSchedule(body);
+    const box = demoBoxes.find(item => item.boxId === demoBoxKeepalive[1]);
+    if (!box) throw new ApiError('box_not_found', '这个 box 不在当前密钥的账号中。', 404);
+    boxPolicies = boxPolicies.filter(item => item.boxId !== box.boxId);
+    if (policy.mode !== 'off') boxPolicies.push({ ...policy, boxId: box.boxId, boxName: box.name, lastCheckedAt: Date.now() - 30000, lastState: 'running', lastResult: '演示模式不运行定时任务', lastError: '' });
+    return boxOverview();
+  }
   if (url.pathname === '/api/telegram') {
     if (method === 'PUT') telegram = { ...telegram, enabled: true, tokenRequired: false, username: 'instabox_demo_bot', chatId: body?.chatId || '', notifyOffline: Boolean(body?.notifyOffline) };
     if (method === 'DELETE') { telegram = { ...telegram, enabled: false, tokenRequired: true, username: '', chatId: '', notifyOffline: false }; return { ok: true, warning: '' }; }
